@@ -1,0 +1,852 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Birthday Horizon</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;800&family=Orbitron:wght@500;900&display=swap');
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            touch-action: none; /* Prevent browser zooming/scrolling on mobile */
+        }
+
+        body {
+            overflow: hidden;
+            background: #000;
+            font-family: 'Nunito', sans-serif;
+        }
+
+        #gameCanvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+        }
+
+        /* UI Overlay */
+        #ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 10;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+        }
+
+        /* Start Screen */
+        #start-screen {
+            pointer-events: auto;
+            background: rgba(255, 255, 255, 0.15);
+            backdrop-filter: blur(10px);
+            padding: 2rem;
+            border-radius: 20px;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
+            text-align: center;
+            transition: opacity 0.5s;
+            animation: float 6s ease-in-out infinite;
+        }
+
+        h1 {
+            color: #fff;
+            font-family: 'Orbitron', sans-serif;
+            margin-bottom: 1rem;
+            text-shadow: 0 0 10px rgba(0, 255, 255, 0.5);
+        }
+
+        input {
+            padding: 10px 15px;
+            border-radius: 25px;
+            border: none;
+            outline: none;
+            font-size: 1.2rem;
+            text-align: center;
+            width: 250px;
+            background: rgba(255, 255, 255, 0.9);
+            color: #333;
+            margin-bottom: 1rem;
+            display: block;
+            margin-left: auto;
+            margin-right: auto;
+            font-family: 'Nunito', sans-serif;
+            font-weight: 800;
+        }
+
+        button {
+            padding: 10px 30px;
+            border-radius: 25px;
+            border: none;
+            background: linear-gradient(45deg, #00f260, #0575e6);
+            color: white;
+            font-size: 1.2rem;
+            font-weight: bold;
+            cursor: pointer;
+            box-shadow: 0 4px 15px rgba(0, 255, 128, 0.4);
+            transition: transform 0.1s, box-shadow 0.1s;
+            pointer-events: auto;
+        }
+
+        button:active {
+            transform: scale(0.95);
+        }
+
+        /* Interaction Prompt */
+        #interact-prompt {
+            position: absolute;
+            bottom: 20%;
+            background: rgba(0, 0, 0, 0.6);
+            color: #fff;
+            padding: 10px 20px;
+            border-radius: 30px;
+            font-family: 'Orbitron', sans-serif;
+            font-size: 1rem;
+            opacity: 0;
+            transition: opacity 0.3s;
+            border: 1px solid #00f260;
+            box-shadow: 0 0 15px #00f260;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+        }
+
+        /* Virtual Controls for Mobile */
+        #joystick-zone {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            width: 120px;
+            height: 120px;
+            z-index: 20;
+            pointer-events: auto;
+            display: none; /* Shown via JS if touch */
+        }
+        
+        #action-btn {
+            position: absolute;
+            bottom: 30px;
+            right: 30px;
+            width: 80px;
+            height: 80px;
+            background: rgba(255, 255, 255, 0.2);
+            border: 2px solid rgba(255, 255, 255, 0.5);
+            border-radius: 50%;
+            z-index: 20;
+            pointer-events: auto;
+            display: none;
+            touch-action: manipulation;
+        }
+
+        #action-btn:active {
+            background: rgba(255, 255, 255, 0.4);
+        }
+
+        @keyframes float {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-10px); }
+        }
+
+        .hidden {
+            opacity: 0;
+            pointer-events: none !important;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Audio Context Placeholder (Silent visual experience, but ready) -->
+
+    <div id="ui-layer">
+        <div id="start-screen">
+            <h1>Project: CELEBRATION</h1>
+            <input type="text" id="name-input" placeholder="Enter Name..." maxlength="15" autocomplete="off">
+            <button id="start-btn">INITIALIZE</button>
+        </div>
+        <div id="interact-prompt">Press 'E' or Tap to Open</div>
+    </div>
+
+    <div id="joystick-zone"></div>
+    <div id="action-btn"></div>
+
+    <canvas id="gameCanvas"></canvas>
+
+    <script>
+        /**
+         * GAME ENGINE & LOGIC
+         */
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const startScreen = document.getElementById('start-screen');
+        const startBtn = document.getElementById('start-btn');
+        const nameInput = document.getElementById('name-input');
+        const interactPrompt = document.getElementById('interact-prompt');
+        const joystickZone = document.getElementById('joystick-zone');
+        const actionBtn = document.getElementById('action-btn');
+
+        // Game State
+        let gameState = 'MENU'; // MENU, PLAYING, CUTSCENE
+        let celebrationName = "Traveler";
+        let frameCount = 0;
+        let isMobile = false;
+
+        // Dimensions
+        let width, height;
+
+        // Camera
+        const camera = { x: 0, y: 0, zoom: 1 };
+
+        // Input
+        const keys = { w: false, a: false, s: false, d: false, ArrowUp: false, ArrowLeft: false, ArrowDown: false, ArrowRight: false, e: false, " ": false };
+        const input = { x: 0, y: 0, action: false };
+
+        // World
+        const WORLD_SIZE = 2000;
+        
+        // Colors
+        const colors = {
+            skyTop: '#4facfe',
+            skyBottom: '#00f2fe',
+            grassBase: '#2e7d32',
+            grassLight: '#4caf50',
+            grassWind: '#81c784',
+            magic: '#00ffff'
+        };
+
+        // Entities
+        const player = {
+            x: 0, 
+            y: 0, 
+            size: 20, 
+            speed: 5, 
+            color: '#fff',
+            floatOffset: 0,
+            trail: [],
+            facing: 1
+        };
+
+        const chest = {
+            x: 0,
+            y: -300,
+            size: 60,
+            opened: false,
+            glowIntensity: 0,
+            floatOffset: 0
+        };
+
+        // Particles
+        let particles = [];
+        let clouds = [];
+        let grassBlades = [];
+
+        // Setup
+        function resize() {
+            width = canvas.width = window.innerWidth;
+            height = canvas.height = window.innerHeight;
+            isMobile = width < 768;
+            if (isMobile && gameState === 'PLAYING') {
+                joystickZone.style.display = 'block';
+                actionBtn.style.display = 'block';
+            }
+        }
+        window.addEventListener('resize', resize);
+        resize();
+
+        // --- Input Handling ---
+        window.addEventListener('keydown', (e) => {
+            if(keys.hasOwnProperty(e.key) || keys.hasOwnProperty(e.key.toLowerCase())) {
+                keys[e.key.toLowerCase()] = true;
+                if(e.key === ' ') keys[' '] = true; 
+            }
+        });
+
+        window.addEventListener('keyup', (e) => {
+            if(keys.hasOwnProperty(e.key) || keys.hasOwnProperty(e.key.toLowerCase())) {
+                keys[e.key.toLowerCase()] = false;
+                if(e.key === ' ') keys[' '] = false;
+            }
+        });
+
+        // Touch Controls (Simple implementation)
+        let touchStart = { x: 0, y: 0 };
+        let activeTouchId = null;
+
+        canvas.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            if(gameState !== 'PLAYING') return;
+            
+            // Right side of screen is action
+            for(let i=0; i<e.changedTouches.length; i++) {
+                const t = e.changedTouches[i];
+                if(t.clientX > width / 2) {
+                    input.action = true;
+                } else {
+                    touchStart.x = t.clientX;
+                    touchStart.y = t.clientY;
+                    activeTouchId = t.identifier;
+                }
+            }
+        }, {passive: false});
+
+        canvas.addEventListener('touchmove', (e) => {
+            e.preventDefault();
+            if(gameState !== 'PLAYING') return;
+
+            for(let i=0; i<e.changedTouches.length; i++) {
+                const t = e.changedTouches[i];
+                if(t.identifier === activeTouchId) {
+                    const dx = t.clientX - touchStart.x;
+                    const dy = t.clientY - touchStart.y;
+                    const dist = Math.sqrt(dx*dx + dy*dy);
+                    const maxDist = 50;
+                    const normalized = Math.min(dist, maxDist) / maxDist;
+                    const angle = Math.atan2(dy, dx);
+                    
+                    input.x = Math.cos(angle) * normalized;
+                    input.y = Math.sin(angle) * normalized;
+                }
+            }
+        }, {passive: false});
+
+        canvas.addEventListener('touchend', (e) => {
+            e.preventDefault();
+            for(let i=0; i<e.changedTouches.length; i++) {
+                const t = e.changedTouches[i];
+                if(t.clientX > width/2) {
+                    input.action = false;
+                }
+                if(t.identifier === activeTouchId) {
+                    input.x = 0;
+                    input.y = 0;
+                    activeTouchId = null;
+                }
+            }
+        });
+
+        actionBtn.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            input.action = true;
+        });
+        actionBtn.addEventListener('touchend', (e) => {
+            e.preventDefault();
+            input.action = false;
+        });
+
+
+        // --- Initialization ---
+        function initGame() {
+            // Generate Clouds
+            for(let i=0; i<20; i++) {
+                clouds.push({
+                    x: (Math.random() * WORLD_SIZE * 2) - WORLD_SIZE,
+                    y: (Math.random() * WORLD_SIZE * 2) - WORLD_SIZE,
+                    size: 50 + Math.random() * 100,
+                    speed: 0.2 + Math.random() * 0.3,
+                    puffs: Math.floor(Math.random() * 5) + 3
+                });
+            }
+
+            // Generate Grass (Optimized: only store relative positions)
+            for(let i=0; i<3000; i++) {
+                const r = Math.random() * WORLD_SIZE;
+                const theta = Math.random() * Math.PI * 2;
+                grassBlades.push({
+                    x: Math.cos(theta) * r,
+                    y: Math.sin(theta) * r,
+                    len: 5 + Math.random() * 10,
+                    angle: (Math.random() - 0.5) * 0.5,
+                    colorOffset: Math.random()
+                });
+            }
+        }
+
+        startBtn.addEventListener('click', () => {
+            const name = nameInput.value.trim();
+            if(name) {
+                celebrationName = name;
+                startScreen.classList.add('hidden');
+                gameState = 'PLAYING';
+                if(isMobile) {
+                    joystickZone.style.display = 'block';
+                    actionBtn.style.display = 'block';
+                }
+            }
+        });
+
+        // --- Rendering Functions ---
+
+        function drawSky(ctx) {
+            // Gradient Sky
+            const grad = ctx.createLinearGradient(0, 0, 0, height);
+            grad.addColorStop(0, colors.skyTop);
+            grad.addColorStop(1, colors.skyBottom);
+            ctx.fillStyle = grad;
+            ctx.fillRect(0, 0, width, height);
+
+            // Sun/Moon
+            ctx.fillStyle = 'rgba(255, 255, 230, 0.8)';
+            ctx.beginPath();
+            ctx.arc(width * 0.8, height * 0.2, 40, 0, Math.PI * 2);
+            ctx.fill();
+            // Sun Glow
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
+            ctx.beginPath();
+            ctx.arc(width * 0.8, height * 0.2, 60 + Math.sin(frameCount * 0.02) * 5, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        function drawGround(ctx, camX, camY) {
+            // Ground base
+            ctx.save();
+            ctx.translate(width/2 - camX, height/2 - camY);
+            
+            // Draw base circle for the world
+            const grad = ctx.createRadialGradient(0, 0, 100, 0, 0, WORLD_SIZE);
+            grad.addColorStop(0, colors.grassLight);
+            grad.addColorStop(1, colors.grassBase);
+            ctx.fillStyle = grad;
+            ctx.beginPath();
+            ctx.arc(0, 0, WORLD_SIZE, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Draw Grass (Only draw if visible on screen for optimization)
+            const wind = Math.sin(frameCount * 0.01);
+            
+            // Simple culling
+            const viewportPadding = 100;
+            const viewLeft = camX - width/2 - viewportPadding;
+            const viewRight = camX + width/2 + viewportPadding;
+            const viewTop = camY - height/2 - viewportPadding;
+            const viewBottom = camY + height/2 + viewportPadding;
+
+            ctx.lineWidth = 2;
+            
+            grassBlades.forEach(b => {
+                if (b.x > viewLeft && b.x < viewRight && b.y > viewTop && b.y < viewBottom) {
+                    ctx.strokeStyle = b.colorOffset > 0.5 ? '#4caf50' : '#43a047';
+                    ctx.beginPath();
+                    ctx.moveTo(b.x, b.y);
+                    // Wind effect
+                    const sway = Math.sin(frameCount * 0.02 + b.x * 0.01 + b.y * 0.01) * 5;
+                    ctx.quadraticCurveTo(b.x + sway, b.y - b.len/2, b.x + sway * 1.5, b.y - b.len);
+                    ctx.stroke();
+                }
+            });
+
+            ctx.restore();
+        }
+
+        function drawClouds(ctx, camX, camY) {
+            ctx.save();
+            // Parallax effect: Clouds move slower than ground
+            ctx.translate(width/2 - camX * 0.5, height/2 - camY * 0.5);
+
+            clouds.forEach(c => {
+                c.x += c.speed;
+                if (c.x > WORLD_SIZE + 200) c.x = -WORLD_SIZE - 200;
+
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+                
+                // Draw fluffy puffs
+                for(let j=0; j<c.puffs; j++) {
+                    const px = c.x + Math.cos(j) * 30;
+                    const py = c.y + Math.sin(j) * 20;
+                    ctx.beginPath();
+                    ctx.arc(px, py, c.size * 0.4, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            });
+
+            ctx.restore();
+        }
+
+        function drawShadows(ctx, camX, camY) {
+             ctx.save();
+            ctx.translate(width/2 - camX, height/2 - camY);
+
+            // Player Shadow
+            ctx.fillStyle = 'rgba(0,0,0,0.2)';
+            ctx.beginPath();
+            ctx.ellipse(player.x, player.y + 25, 15, 8, 0, 0, Math.PI*2);
+            ctx.fill();
+
+            // Chest Shadow
+            if (!chest.opened) {
+                ctx.beginPath();
+                ctx.ellipse(chest.x, chest.y + 40, 40, 20, 0, 0, Math.PI*2);
+                ctx.fill();
+            }
+
+            ctx.restore();
+        }
+
+        function drawPlayer(ctx, camX, camY) {
+            const screenX = width/2;
+            const screenY = height/2;
+
+            // Float animation
+            player.floatOffset = Math.sin(frameCount * 0.05) * 5;
+
+            // Trail (Spirit particles)
+            if (frameCount % 5 === 0 && (input.x !== 0 || input.y !== 0)) {
+                player.trail.push({
+                    x: screenX + (Math.random()-0.5)*10,
+                    y: screenY + (Math.random()-0.5)*10,
+                    life: 1.0,
+                    size: Math.random() * 5
+                });
+            }
+
+            // Draw Trail
+            player.trail.forEach((p, i) => {
+                p.life -= 0.05;
+                p.y -= 1; // Float up
+                ctx.fillStyle = `rgba(255, 255, 255, ${p.life * 0.5})`;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y + player.floatOffset, p.size, 0, Math.PI*2);
+                ctx.fill();
+                if(p.life <= 0) player.trail.splice(i, 1);
+            });
+
+            // Draw Body (Spirit/Totoro-ish shape)
+            ctx.save();
+            ctx.translate(screenX, screenY + player.floatOffset);
+            
+            // Main Glow
+            const glow = ctx.createRadialGradient(0, 0, 10, 0, 0, 30);
+            glow.addColorStop(0, 'rgba(255,255,255,0.8)');
+            glow.addColorStop(1, 'rgba(255,255,255,0)');
+            ctx.fillStyle = glow;
+            ctx.beginPath();
+            ctx.arc(0, 0, 30, 0, Math.PI*2);
+            ctx.fill();
+
+            // Core
+            ctx.fillStyle = '#fff';
+            ctx.beginPath();
+            ctx.arc(0, 0, 15, 0, Math.PI*2);
+            ctx.fill();
+
+            // Eyes
+            ctx.fillStyle = '#333';
+            const eyeOffset = player.facing * 4;
+            ctx.beginPath();
+            ctx.ellipse(-5 + eyeOffset, -2, 2, 4, 0, 0, Math.PI*2);
+            ctx.ellipse(5 + eyeOffset, -2, 2, 4, 0, 0, Math.PI*2);
+            ctx.fill();
+
+            // Futuristic Ring
+            ctx.strokeStyle = colors.magic;
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(0, 0, 22, frameCount * 0.1, frameCount * 0.1 + Math.PI * 1.5);
+            ctx.stroke();
+
+            ctx.restore();
+        }
+
+        function drawChest(ctx, camX, camY) {
+            ctx.save();
+            ctx.translate(width/2 - camX + chest.x, height/2 - camY + chest.y);
+
+            chest.floatOffset = Math.sin(frameCount * 0.03) * 10;
+            
+            // Hovering motion
+            ctx.translate(0, chest.floatOffset);
+
+            if(!chest.opened) {
+                // Draw Futuristic Monolith/Cube
+                ctx.fillStyle = 'rgba(20, 20, 30, 0.9)';
+                ctx.strokeStyle = colors.magic;
+                ctx.lineWidth = 3;
+
+                // Hexagon Shape
+                ctx.beginPath();
+                for(let i=0; i<6; i++) {
+                    const angle = (i * 60 * Math.PI) / 180;
+                    ctx.lineTo(Math.cos(angle)*30, Math.sin(angle)*30);
+                }
+                ctx.closePath();
+                ctx.fill();
+                ctx.stroke();
+
+                // Inner glow pulse
+                const pulse = (Math.sin(frameCount * 0.1) + 1) / 2; // 0 to 1
+                ctx.fillStyle = `rgba(0, 255, 255, ${pulse * 0.5})`;
+                ctx.beginPath();
+                ctx.arc(0, 0, 10, 0, Math.PI*2);
+                ctx.fill();
+                
+                // Spinning Rings
+                ctx.strokeStyle = `rgba(255, 0, 255, 0.7)`;
+                ctx.beginPath();
+                ctx.ellipse(0, 0, 40, 10, frameCount * 0.05, 0, Math.PI*2);
+                ctx.stroke();
+                
+                ctx.strokeStyle = `rgba(0, 255, 255, 0.7)`;
+                ctx.beginPath();
+                ctx.ellipse(0, 0, 40, 10, -frameCount * 0.05, 0, Math.PI*2);
+                ctx.stroke();
+
+            } else {
+                // Opened State - Emitter
+                ctx.fillStyle = '#fff';
+                ctx.beginPath();
+                ctx.arc(0, 0, 10, 0, Math.PI*2);
+                ctx.fill();
+            }
+
+            ctx.restore();
+        }
+
+        function drawParticles(ctx, camX, camY) {
+            ctx.save();
+            ctx.translate(width/2 - camX, height/2 - camY);
+            
+            for(let i = particles.length - 1; i >= 0; i--) {
+                const p = particles[i];
+                p.x += p.vx;
+                p.y += p.vy;
+                p.life -= 0.01;
+                p.vy += 0.05; // Gravity (if applicable) or float up
+
+                if(p.type === 'firework') {
+                    p.vy -= 0.08; // Float up
+                    p.vx *= 0.95; // Friction
+                }
+
+                ctx.globalAlpha = p.life;
+                ctx.fillStyle = p.color;
+                
+                if(p.shape === 'text') {
+                    ctx.font = `${p.size}px 'Orbitron'`;
+                    ctx.fillText(p.text, p.x, p.y);
+                } else if (p.shape === 'star') {
+                    // Simple cross for star
+                    ctx.beginPath();
+                    ctx.moveTo(p.x - p.size, p.y);
+                    ctx.lineTo(p.x + p.size, p.y);
+                    ctx.moveTo(p.x, p.y - p.size);
+                    ctx.lineTo(p.x, p.y + p.size);
+                    ctx.strokeStyle = p.color;
+                    ctx.lineWidth = 2;
+                    ctx.stroke();
+                } else {
+                    ctx.beginPath();
+                    ctx.arc(p.x, p.y, p.size, 0, Math.PI*2);
+                    ctx.fill();
+                }
+
+                if(p.life <= 0) particles.splice(i, 1);
+            }
+            ctx.restore();
+        }
+
+        // --- Game Logic ---
+
+        function update() {
+            if (gameState === 'PLAYING' || gameState === 'CUTSCENE') {
+                // Input handling
+                let dx = 0;
+                let dy = 0;
+
+                // Keyboard
+                if (keys.w || keys.arrowup) dy = -1;
+                if (keys.s || keys.arrowdown) dy = 1;
+                if (keys.a || keys.arrowleft) dx = -1;
+                if (keys.d || keys.arrowright) dx = 1;
+
+                // Touch Joystick overrides keyboard if active
+                if (input.x !== 0 || input.y !== 0) {
+                    dx = input.x;
+                    dy = input.y;
+                }
+
+                // Normalize vector
+                if (dx !== 0 || dy !== 0) {
+                    const len = Math.sqrt(dx*dx + dy*dy);
+                    if (len > 1) {
+                        dx /= len;
+                        dy /= len;
+                    }
+                    if(dx > 0) player.facing = 1;
+                    if(dx < 0) player.facing = -1;
+                }
+
+                // Move Player
+                if (gameState === 'PLAYING') {
+                    player.x += dx * player.speed;
+                    player.y += dy * player.speed;
+
+                    // World Bounds
+                    const bound = WORLD_SIZE - 50;
+                    if(player.x < -bound) player.x = -bound;
+                    if(player.x > bound) player.x = bound;
+                    if(player.y < -bound) player.y = -bound;
+                    if(player.y > bound) player.y = bound;
+                }
+
+                // Camera Follow (Smooth lerp)
+                camera.x += (player.x - camera.x) * 0.1;
+                camera.y += (player.y - camera.y) * 0.1;
+
+                // Check Interaction
+                const distToChest = Math.sqrt(Math.pow(player.x - chest.x, 2) + Math.pow(player.y - chest.y, 2));
+                
+                if (gameState === 'PLAYING' && !chest.opened && distToChest < 100) {
+                    interactPrompt.style.opacity = 1;
+                    if (keys.e || keys[' '] || input.action) {
+                        openChest();
+                    }
+                } else {
+                    interactPrompt.style.opacity = 0;
+                }
+
+                // Fireworks logic in cutscene
+                if (gameState === 'CUTSCENE') {
+                    if (frameCount % 10 === 0) {
+                        spawnFirework(chest.x, chest.y);
+                    }
+                }
+            }
+            frameCount++;
+        }
+
+        function openChest() {
+            gameState = 'CUTSCENE';
+            chest.opened = true;
+            interactPrompt.style.opacity = 0;
+            joystickZone.style.display = 'none';
+            actionBtn.style.display = 'none';
+
+            // Initial Explosion
+            for(let i=0; i<100; i++) {
+                const angle = Math.random() * Math.PI * 2;
+                const speed = Math.random() * 15;
+                particles.push({
+                    x: chest.x,
+                    y: chest.y,
+                    vx: Math.cos(angle) * speed,
+                    vy: Math.sin(angle) * speed,
+                    size: Math.random() * 5 + 2,
+                    color: `hsl(${Math.random()*360}, 100%, 70%)`,
+                    life: 2.0,
+                    type: 'firework',
+                    shape: 'circle'
+                });
+            }
+
+            // Display Text after delay
+            setTimeout(() => {
+                // "Happy"
+                particles.push({
+                    x: chest.x,
+                    y: chest.y - 150,
+                    vx: 0, vy: -0.5,
+                    life: 5.0,
+                    color: '#fff',
+                    size: 40,
+                    text: "HAPPY",
+                    type: 'text',
+                    shape: 'text'
+                });
+                
+                // "Birthday"
+                particles.push({
+                    x: chest.x,
+                    y: chest.y - 100,
+                    vx: 0, vy: -0.5,
+                    life: 5.0,
+                    color: '#00ffff',
+                    size: 60,
+                    text: "BIRTHDAY",
+                    type: 'text',
+                    shape: 'text'
+                });
+
+                // Name
+                particles.push({
+                    x: chest.x,
+                    y: chest.y - 40,
+                    vx: 0, vy: -0.5,
+                    life: 5.0,
+                    color: '#ff00ff',
+                    size: 50,
+                    text: celebrationName.toUpperCase() + "!",
+                    type: 'text',
+                    shape: 'text'
+                });
+            }, 500);
+        }
+
+        function spawnFirework(originX, originY) {
+             const x = originX + (Math.random() - 0.5) * 600;
+             const y = originY - 200 + (Math.random() - 0.5) * 300;
+             
+             // Create explosion at random point
+             for(let i=0; i<30; i++) {
+                const angle = Math.random() * Math.PI * 2;
+                const speed = Math.random() * 5;
+                particles.push({
+                    x: x,
+                    y: y,
+                    vx: Math.cos(angle) * speed,
+                    vy: Math.sin(angle) * speed,
+                    size: Math.random() * 3,
+                    color: `hsl(${Math.random()*360}, 100%, 80%)`,
+                    life: 1.5,
+                    type: 'firework',
+                    shape: Math.random() > 0.5 ? 'star' : 'circle'
+                });
+            }
+        }
+
+        function render() {
+            ctx.clearRect(0, 0, width, height);
+
+            drawSky(ctx);
+            drawClouds(ctx, camera.x, camera.y); // Background clouds
+            drawGround(ctx, camera.x, camera.y);
+            drawShadows(ctx, camera.x, camera.y);
+            
+            // Draw Chest (if behind player, draw first, else draw after)
+            // Simple z-sorting based on Y
+            if (chest.y < player.y) {
+                drawChest(ctx, camera.x, camera.y);
+                drawPlayer(ctx, camera.x, camera.y);
+            } else {
+                drawPlayer(ctx, camera.x, camera.y);
+                drawChest(ctx, camera.x, camera.y);
+            }
+
+            drawParticles(ctx, camera.x, camera.y);
+
+            // Vignette
+            const grad = ctx.createRadialGradient(width/2, height/2, height/2, width/2, height/2, height);
+            grad.addColorStop(0, 'transparent');
+            grad.addColorStop(1, 'rgba(0,0,0,0.3)');
+            ctx.fillStyle = grad;
+            ctx.fillRect(0,0,width,height);
+        }
+
+        function loop() {
+            update();
+            render();
+            requestAnimationFrame(loop);
+        }
+
+        // Start
+        initGame();
+        loop();
+
+    </script>
+</body>
+</html>
